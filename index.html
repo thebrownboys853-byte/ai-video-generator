@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>AI Video Generator</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 92%;
+      max-width: 600px;
+      background: #1e293b;
+      padding: 25px;
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #cbd5e1;
+      margin-bottom: 25px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 140px;
+      padding: 15px;
+      border: none;
+      border-radius: 12px;
+      resize: none;
+      font-size: 16px;
+      outline: none;
+    }
+
+    select {
+      width: 100%;
+      margin-top: 15px;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      font-size: 16px;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 15px;
+      padding: 15px;
+      border: none;
+      border-radius: 12px;
+      background: #6366f1;
+      color: white;
+      font-size: 17px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #4f46e5;
+    }
+
+    #status {
+      margin-top: 20px;
+      text-align: center;
+      color: #cbd5e1;
+    }
+
+    .video-box {
+      margin-top: 20px;
+      display: none;
+    }
+
+    video {
+      width: 100%;
+      border-radius: 12px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h1>🎬 AI Video Generator</h1>
+
+    <div class="subtitle">
+      Create amazing videos from your ideas
+    </div>
+
+    <textarea
+      id="prompt"
+      placeholder="Write your video prompt here...&#10;&#10;Example: A young boy running through a beautiful forest at sunset, cinematic lighting, realistic style"
+    ></textarea>
+
+    <select id="ratio">
+      <option value="16:9">Landscape — 16:9</option>
+      <option value="9:16">Portrait — 9:16</option>
+      <option value="1:1">Square — 1:1</option>
+    </select>
+
+    <button onclick="generateVideo()">
+      🚀 Generate Video
+    </button>
+
+    <div id="status"></div>
+
+    <div class="video-box" id="videoBox">
+      <video id="videoPlayer" controls></video>
+    </div>
+
+  </div>
+
+  <script>
+
+    function generateVideo() {
+
+      const prompt = document.getElementById("prompt").value.trim();
+      const ratio = document.getElementById("ratio").value;
+      const status = document.getElementById("status");
+
+      if (prompt === "") {
+        status.innerText = "⚠️ Please enter a video prompt.";
+        return;
+      }
+
+      status.innerText =
+        "⏳ Video generation system will be connected here...";
+
+      console.log("Prompt:", prompt);
+      console.log("Aspect Ratio:", ratio);
+    }
+
+  </script>
+
+</body>
+</html>
