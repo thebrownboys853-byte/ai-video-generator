@@ -38,7 +38,7 @@ export default {
           return Response.json(
             {
               success: false,
-              message: "fal.ai request failed",
+              message: data?.error || data?.message || `fal.ai request failed (${response.status})`,
               error: data
             },
             { status: response.status }
