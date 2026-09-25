@@ -79,10 +79,16 @@
       background: #4f46e5;
     }
 
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     #status {
       margin-top: 20px;
       text-align: center;
       color: #cbd5e1;
+      line-height: 1.5;
     }
 
     .video-box {
@@ -93,6 +99,7 @@
     video {
       width: 100%;
       border-radius: 12px;
+      background: #000;
     }
   </style>
 </head>
@@ -118,7 +125,7 @@
       <option value="1:1">Square — 1:1</option>
     </select>
 
-    <button onclick="generateVideo()">
+    <button id="generateButton" onclick="generateVideo()">
       🚀 Generate Video
     </button>
 
@@ -132,22 +139,149 @@
 
   <script>
 
-    function generateVideo() {
+    async function generateVideo() {
 
       const prompt = document.getElementById("prompt").value.trim();
       const ratio = document.getElementById("ratio").value;
       const status = document.getElementById("status");
+      const button = document.getElementById("generateButton");
+      const videoBox = document.getElementById("videoBox");
+      const video = document.getElementById("videoPlayer");
 
-      if (prompt === "") {
+      if (!prompt) {
         status.innerText = "⚠️ Please enter a video prompt.";
         return;
       }
 
-      status.innerText =
-        "⏳ Video generation system will be connected here...";
+      button.disabled = true;
+      videoBox.style.display = "none";
+      video.removeAttribute("src");
 
-      console.log("Prompt:", prompt);
-      console.log("Aspect Ratio:", ratio);
+      status.innerText = "⏳ Starting video generation...";
+
+      try {
+
+        // Step 1: Send prompt to Cloudflare Worker
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            prompt: prompt,
+            ratio: ratio
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Generation request failed"
+          );
+        }
+
+        const requestId = data.request_id;
+
+        if (!requestId) {
+          throw new Error("No request ID received from server");
+        }
+
+        status.innerText =
+          "🎬 Video generation started... Please wait.";
+
+        // Step 2: Check generation status
+        let completed = false;
+
+        while (!completed) {
+
+          await new Promise(resolve =>
+            setTimeout(resolve, 5000)
+          );
+
+          const statusResponse = await fetch(
+            `/api/status?id=${encodeURIComponent(requestId)}`
+          );
+
+          const statusData = await statusResponse.json();
+
+          if (!statusResponse.ok) {
+            throw new Error(
+              statusData.message || "Could not check video status"
+            );
+          }
+
+          if (statusData.status === "COMPLETED") {
+
+            completed = true;
+
+            status.innerText =
+              "✅ Video generation completed!";
+
+          } else if (statusData.status === "FAILED") {
+
+            throw new Error(
+              "Video generation failed"
+            );
+
+          } else if (statusData.status === "IN_PROGRESS") {
+
+            status.innerText =
+              "🎬 Generating your video...";
+
+          } else {
+
+            status.innerText =
+              "⏳ Video is in queue...";
+
+          }
+        }
+
+        // Step 3: Get completed video
+        status.innerText =
+          "📥 Loading your video...";
+
+        const resultResponse = await fetch(
+          `/api/result?id=${encodeURIComponent(requestId)}`
+        );
+
+        const resultData = await resultResponse.json();
+
+        if (!resultResponse.ok) {
+          throw new Error(
+            resultData.message || "Could not get video result"
+          );
+        }
+
+        const videoUrl =
+          resultData.video?.url;
+
+        if (!videoUrl) {
+          throw new Error(
+            "Video URL was not returned"
+          );
+        }
+
+        // Step 4: Show video
+        video.src = videoUrl;
+        videoBox.style.display = "block";
+        video.load();
+
+        status.innerText =
+          "🎉 Video generated successfully!";
+
+      } catch (error) {
+
+        console.error("Video generation error:", error);
+
+        status.innerText =
+          "❌ " + (error.message || "Something went wrong");
+
+      } finally {
+
+        button.disabled = false;
+
+      }
     }
 
   </script>
