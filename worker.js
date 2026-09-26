@@ -1,180 +1,123 @@
-const MODEL = "fal-ai/wan/v2.2-a14b/text-to-video";
+import { InferenceClient } from "@huggingface/inference";
 
 export default {
   async fetch(request, env) {
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    };
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders,
+      });
+    }
+
     const url = new URL(request.url);
 
-    // Check FAL_KEY
-    if (!env.FAL_KEY) {
-      return Response.json(
+    // Health check
+    if (url.pathname === "/" && request.method === "GET") {
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          message: "AI Video Generator API is running",
+        }),
         {
-          success: false,
-          message: "FAL_KEY is missing in Cloudflare Worker secrets."
-        },
-        { status: 500 }
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders,
+          },
+        }
       );
     }
 
     // Generate video
     if (url.pathname === "/api/generate" && request.method === "POST") {
       try {
+        if (!env.HF_TOKEN) {
+          return new Response(
+            JSON.stringify({
+              error: "HF_TOKEN is not configured in Cloudflare.",
+            }),
+            {
+              status: 500,
+              headers: {
+                "Content-Type": "application/json",
+                ...corsHeaders,
+              },
+            }
+          );
+        }
+
         const body = await request.json();
-        const prompt = body?.prompt;
-        const ratio = body?.ratio || "16:9";
 
-        if (!prompt || !prompt.trim()) {
-          return Response.json(
+        const prompt = body.prompt;
+
+        if (!prompt || typeof prompt !== "string") {
+          return new Response(
+            JSON.stringify({
+              error: "Please provide a prompt.",
+            }),
             {
-              success: false,
-              message: "Video prompt is required"
-            },
-            { status: 400 }
-          );
-        }
-
-        const response = await fetch(
-          `https://queue.fal.run/${MODEL}`,
-          {
-            method: "POST",
-            headers: {
-              "Authorization": `Key ${env.FAL_KEY}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              prompt: prompt.trim(),
-              aspect_ratio: ratio,
-              resolution: "720p"
-            })
-          }
-        );
-
-        const data = await response.json();
-
-        console.log("FAL STATUS:", response.status);
-        console.log("FAL RESPONSE:", data);
-
-        if (!response.ok) {
-          return Response.json(
-            {
-              success: false,
-              message:
-                data?.detail ||
-                data?.error ||
-                data?.message ||
-                `fal.ai request failed (${response.status})`,
-              fal_status: response.status
-            },
-            { status: response.status }
-          );
-        }
-
-        return Response.json({
-          success: true,
-          request_id: data.request_id
-        });
-
-      } catch (error) {
-        console.log("GENERATE ERROR:", error);
-
-        return Response.json(
-          {
-            success: false,
-            message: error.message || "Generation failed"
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Check status
-    if (url.pathname === "/api/status" && request.method === "GET") {
-      try {
-        const requestId = url.searchParams.get("id");
-
-        if (!requestId) {
-          return Response.json(
-            {
-              success: false,
-              message: "Request ID is required"
-            },
-            { status: 400 }
-          );
-        }
-
-        const response = await fetch(
-          `https://queue.fal.run/${MODEL}/requests/${requestId}/status`,
-          {
-            headers: {
-              "Authorization": `Key ${env.FAL_KEY}`
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                ...corsHeaders,
+              },
             }
-          }
-        );
-
-        const data = await response.json();
-
-        return Response.json(data, {
-          status: response.status
-        });
-
-      } catch (error) {
-        return Response.json(
-          {
-            success: false,
-            message: error.message
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Get result
-    if (url.pathname === "/api/result" && request.method === "GET") {
-      try {
-        const requestId = url.searchParams.get("id");
-
-        if (!requestId) {
-          return Response.json(
-            {
-              success: false,
-              message: "Request ID is required"
-            },
-            { status: 400 }
           );
         }
 
-        const response = await fetch(
-          `https://queue.fal.run/${MODEL}/requests/${requestId}`,
-          {
-            headers: {
-              "Authorization": `Key ${env.FAL_KEY}`
-            }
-          }
-        );
+        const client = new InferenceClient(env.HF_TOKEN);
 
-        const data = await response.json();
+        // Text-to-video model
+        const video = await client.textToVideo({
+          model: "Lightricks/LTX-Video-0.9.8-13B-distilled",
+          inputs: prompt,
+        });
 
-        return Response.json(data, {
-          status: response.status
+        // Return generated video
+        return new Response(video, {
+          status: 200,
+          headers: {
+            "Content-Type": "video/mp4",
+            "Cache-Control": "no-store",
+            ...corsHeaders,
+          },
         });
 
       } catch (error) {
-        return Response.json(
+        console.error("HF VIDEO ERROR:", error);
+
+        return new Response(
+          JSON.stringify({
+            error: "Video generation failed",
+            message: error?.message || String(error),
+          }),
           {
-            success: false,
-            message: error.message
-          },
-          { status: 500 }
+            status: 500,
+            headers: {
+              "Content-Type": "application/json",
+              ...corsHeaders,
+            },
+          }
         );
       }
     }
 
-    // Website
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
-    }
-
-    return new Response("AI Video Generator", {
-      status: 200
-    });
-  }
+    return new Response(
+      JSON.stringify({
+        error: "Not found",
+      }),
+      {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders,
+        },
+      }
+    );
+  },
 };
