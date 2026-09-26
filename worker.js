@@ -4,10 +4,23 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // Check FAL_KEY
+    if (!env.FAL_KEY) {
+      return Response.json(
+        {
+          success: false,
+          message: "FAL_KEY is missing in Cloudflare Worker secrets."
+        },
+        { status: 500 }
+      );
+    }
+
     // Generate video
     if (url.pathname === "/api/generate" && request.method === "POST") {
       try {
-        const { prompt, ratio } = await request.json();
+        const body = await request.json();
+        const prompt = body?.prompt;
+        const ratio = body?.ratio || "16:9";
 
         if (!prompt || !prompt.trim()) {
           return Response.json(
@@ -19,34 +32,37 @@ export default {
           );
         }
 
-        const response = await fetch(`https://queue.fal.run/${MODEL}`, {
-          method: "POST",
-          headers: {
-            "Authorization": `Key ${env.FAL_KEY}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            prompt: prompt.trim(),
-            aspect_ratio: ratio || "16:9",
-            resolution: "720p"
-          })
-        });
+        const response = await fetch(
+          `https://queue.fal.run/${MODEL}`,
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Key ${env.FAL_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              prompt: prompt.trim(),
+              aspect_ratio: ratio,
+              resolution: "720p"
+            })
+          }
+        );
 
         const data = await response.json();
 
-        // DEBUG: show actual fal.ai response in Cloudflare Logs
-        console.log("FAL RESPONSE STATUS:", response.status);
-        console.log("FAL RESPONSE BODY:", data);
+        console.log("FAL STATUS:", response.status);
+        console.log("FAL RESPONSE:", data);
 
         if (!response.ok) {
           return Response.json(
             {
               success: false,
               message:
+                data?.detail ||
                 data?.error ||
                 data?.message ||
                 `fal.ai request failed (${response.status})`,
-              error: data
+              fal_status: response.status
             },
             { status: response.status }
           );
@@ -58,19 +74,19 @@ export default {
         });
 
       } catch (error) {
-        console.log("WORKER ERROR:", error);
+        console.log("GENERATE ERROR:", error);
 
         return Response.json(
           {
             success: false,
-            message: error.message
+            message: error.message || "Generation failed"
           },
           { status: 500 }
         );
       }
     }
 
-    // Check video generation status
+    // Check status
     if (url.pathname === "/api/status" && request.method === "GET") {
       try {
         const requestId = url.searchParams.get("id");
@@ -96,15 +112,11 @@ export default {
 
         const data = await response.json();
 
-        console.log("FAL STATUS:", response.status, data);
-
         return Response.json(data, {
           status: response.status
         });
 
       } catch (error) {
-        console.log("STATUS ERROR:", error);
-
         return Response.json(
           {
             success: false,
@@ -115,7 +127,7 @@ export default {
       }
     }
 
-    // Get completed result
+    // Get result
     if (url.pathname === "/api/result" && request.method === "GET") {
       try {
         const requestId = url.searchParams.get("id");
@@ -141,15 +153,11 @@ export default {
 
         const data = await response.json();
 
-        console.log("FAL RESULT:", response.status, data);
-
         return Response.json(data, {
           status: response.status
         });
 
       } catch (error) {
-        console.log("RESULT ERROR:", error);
-
         return Response.json(
           {
             success: false,
@@ -160,7 +168,7 @@ export default {
       }
     }
 
-    // Serve website files
+    // Website
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
