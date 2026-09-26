@@ -34,11 +34,18 @@ export default {
 
         const data = await response.json();
 
+        // DEBUG: show actual fal.ai response in Cloudflare Logs
+        console.log("FAL RESPONSE STATUS:", response.status);
+        console.log("FAL RESPONSE BODY:", data);
+
         if (!response.ok) {
           return Response.json(
             {
               success: false,
-              message: data?.error || data?.message || `fal.ai request failed (${response.status})`,
+              message:
+                data?.error ||
+                data?.message ||
+                `fal.ai request failed (${response.status})`,
               error: data
             },
             { status: response.status }
@@ -51,6 +58,8 @@ export default {
         });
 
       } catch (error) {
+        console.log("WORKER ERROR:", error);
+
         return Response.json(
           {
             success: false,
@@ -87,11 +96,15 @@ export default {
 
         const data = await response.json();
 
+        console.log("FAL STATUS:", response.status, data);
+
         return Response.json(data, {
           status: response.status
         });
 
       } catch (error) {
+        console.log("STATUS ERROR:", error);
+
         return Response.json(
           {
             success: false,
@@ -128,11 +141,15 @@ export default {
 
         const data = await response.json();
 
+        console.log("FAL RESULT:", response.status, data);
+
         return Response.json(data, {
           status: response.status
         });
 
       } catch (error) {
+        console.log("RESULT ERROR:", error);
+
         return Response.json(
           {
             success: false,
