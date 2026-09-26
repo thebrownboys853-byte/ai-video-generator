@@ -1,123 +1,90 @@
-import { InferenceClient } from "@huggingface/inference";
+const MODEL = "fal-ai/wan/v2.2-a14b/text-to-video";
 
 export default {
   async fetch(request, env) {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    };
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: corsHeaders,
-      });
-    }
-
     const url = new URL(request.url);
 
-    // Health check
-    if (url.pathname === "/" && request.method === "GET") {
-      return new Response(
-        JSON.stringify({
-          status: "ok",
-          message: "AI Video Generator API is running",
-        }),
-        {
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders,
-          },
+    // CORS
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type"
         }
-      );
+      });
     }
 
     // Generate video
     if (url.pathname === "/api/generate" && request.method === "POST") {
       try {
-        if (!env.HF_TOKEN) {
-          return new Response(
-            JSON.stringify({
-              error: "HF_TOKEN is not configured in Cloudflare.",
-            }),
-            {
-              status: 500,
-              headers: {
-                "Content-Type": "application/json",
-                ...corsHeaders,
-              },
-            }
-          );
+        const { prompt, ratio } = await request.json();
+
+        if (!prompt) {
+          return json({
+            error: "Prompt is required"
+          }, 400);
         }
 
-        const body = await request.json();
+        // Cloudflare Secret
+        const HE_TOKEN = env.HE_TOKEN;
 
-        const prompt = body.prompt;
-
-        if (!prompt || typeof prompt !== "string") {
-          return new Response(
-            JSON.stringify({
-              error: "Please provide a prompt.",
-            }),
-            {
-              status: 400,
-              headers: {
-                "Content-Type": "application/json",
-                ...corsHeaders,
-              },
-            }
-          );
+        if (!HE_TOKEN) {
+          return json({
+            error: "HE_TOKEN is missing in Cloudflare Worker Secrets"
+          }, 500);
         }
 
-        const client = new InferenceClient(env.HF_TOKEN);
-
-        // Text-to-video model
-        const video = await client.textToVideo({
-          model: "Lightricks/LTX-Video-0.9.8-13B-distilled",
-          inputs: prompt,
-        });
-
-        // Return generated video
-        return new Response(video, {
-          status: 200,
-          headers: {
-            "Content-Type": "video/mp4",
-            "Cache-Control": "no-store",
-            ...corsHeaders,
-          },
-        });
-
-      } catch (error) {
-        console.error("HF VIDEO ERROR:", error);
-
-        return new Response(
-          JSON.stringify({
-            error: "Video generation failed",
-            message: error?.message || String(error),
-          }),
+        const response = await fetch(
+          `https://queue.fal.run/${MODEL}`,
           {
-            status: 500,
+            method: "POST",
             headers: {
-              "Content-Type": "application/json",
-              ...corsHeaders,
+              "Authorization": `Key ${HE_TOKEN}`,
+              "Content-Type": "application/json"
             },
+            body: JSON.stringify({
+              prompt,
+              aspect_ratio: ratio || "16:9"
+            })
           }
         );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          return json({
+            error: "fal.ai request failed",
+            status: response.status,
+            details: data
+          }, response.status);
+        }
+
+        return json(data, 200);
+
+      } catch (error) {
+        return json({
+          error: "Server error",
+          message: error.message
+        }, 500);
       }
     }
 
-    return new Response(
-      JSON.stringify({
-        error: "Not found",
-      }),
-      {
-        status: 404,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders,
-        },
-      }
-    );
-  },
+    return json({
+      error: "Not found"
+    }, 404);
+  }
 };
+
+function json(data, status = 200) {
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    }
+  );
+}
