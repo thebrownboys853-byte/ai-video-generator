@@ -2,14 +2,14 @@ const MODEL = "Wan-AI/Wan2.1-T2V-1.3B";
 
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
     // CORS
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: corsHeaders()
       });
     }
-
-    const url = new URL(request.url);
 
     // Health check
     if (url.pathname === "/" && request.method === "GET") {
@@ -23,22 +23,19 @@ export default {
     // Generate video
     if (url.pathname === "/api/generate" && request.method === "POST") {
       try {
-        // Check Hugging Face token
         if (!env.HF_TOKEN) {
           return jsonResponse(
             {
               success: false,
-              error: "HF_TOKEN is missing in Cloudflare Worker secrets"
+              error: "HF_TOKEN is missing"
             },
             500
           );
         }
 
-        // Read request body
         const body = await request.json();
 
         const prompt = body.prompt;
-        const ratio = body.ratio || "16:9";
 
         if (!prompt || typeof prompt !== "string") {
           return jsonResponse(
@@ -50,14 +47,16 @@ export default {
           );
         }
 
-        // Optional negative prompt
-        const negativePrompt =
-          body.negative_prompt ||
-          "blurry, low quality, distorted, watermark, text, logo";
+        /*
+         * Hugging Face Inference Providers
+         *
+         * :fastest automatically selects an available
+         * provider for the model.
+         */
+        const model = `${MODEL}:fastest`;
 
-        // Hugging Face Inference API
-        const hfResponse = await fetch(
-          "https://router.huggingface.co/hf-inference/models/" + MODEL,
+        const response = await fetch(
+          "https://router.huggingface.co/hf-inference/models/" + model,
           {
             method: "POST",
             headers: {
@@ -67,38 +66,45 @@ export default {
             body: JSON.stringify({
               inputs: prompt,
               parameters: {
-                negative_prompt: negativePrompt
+                negative_prompt:
+                  "blurry, low quality, distorted, deformed, watermark, text, logo",
+                num_frames: 49,
+                guidance_scale: 7.5,
+                num_inference_steps: 25
               }
             })
           }
         );
 
-        // Handle HF errors
-        if (!hfResponse.ok) {
-          const errorText = await hfResponse.text();
+        /*
+         * If Hugging Face returns an error,
+         * send the actual error to the frontend.
+         */
+        if (!response.ok) {
+          const errorText = await response.text();
 
           return jsonResponse(
             {
               success: false,
               error: "Hugging Face request failed",
-              status: hfResponse.status,
+              status: response.status,
               details: errorText
             },
-            hfResponse.status
+            response.status
           );
         }
 
-        // HF returns generated video as binary data
-        const videoBuffer = await hfResponse.arrayBuffer();
+        /*
+         * Successful response = raw video bytes.
+         */
+        const videoBuffer = await response.arrayBuffer();
 
-        // Convert video to base64 so frontend can receive it
         const base64Video = arrayBufferToBase64(videoBuffer);
 
         return jsonResponse({
           success: true,
           provider: "Hugging Face",
           model: MODEL,
-          ratio: ratio,
           video: `data:video/mp4;base64,${base64Video}`
         });
 
@@ -106,7 +112,7 @@ export default {
         return jsonResponse(
           {
             success: false,
-            error: "Server error",
+            error: "Worker error",
             details: error.message
           },
           500
@@ -125,18 +131,23 @@ export default {
 };
 
 
-// -----------------------------
-// Helper functions
-// -----------------------------
+// ------------------------------------
+// CORS
+// ------------------------------------
 
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization"
   };
 }
 
+
+// ------------------------------------
+// JSON response
+// ------------------------------------
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -148,6 +159,10 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+
+// ------------------------------------
+// ArrayBuffer → Base64
+// ------------------------------------
 
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -166,4 +181,4 @@ function arrayBufferToBase64(buffer) {
   }
 
   return btoa(binary);
-    }
+}
