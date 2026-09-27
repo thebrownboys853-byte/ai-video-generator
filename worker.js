@@ -1,90 +1,169 @@
-const MODEL = "fal-ai/wan/v2.2-a14b/text-to-video";
+const MODEL = "Wan-AI/Wan2.1-T2V-1.3B";
 
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
-
     // CORS
     if (request.method === "OPTIONS") {
       return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type"
-        }
+        headers: corsHeaders()
+      });
+    }
+
+    const url = new URL(request.url);
+
+    // Health check
+    if (url.pathname === "/" && request.method === "GET") {
+      return jsonResponse({
+        success: true,
+        message: "AI Video Generator API is running",
+        provider: "Hugging Face"
       });
     }
 
     // Generate video
     if (url.pathname === "/api/generate" && request.method === "POST") {
       try {
-        const { prompt, ratio } = await request.json();
-
-        if (!prompt) {
-          return json({
-            error: "Prompt is required"
-          }, 400);
+        // Check Hugging Face token
+        if (!env.HF_TOKEN) {
+          return jsonResponse(
+            {
+              success: false,
+              error: "HF_TOKEN is missing in Cloudflare Worker secrets"
+            },
+            500
+          );
         }
 
-        // Cloudflare Secret
-        const HE_TOKEN = env.HE_TOKEN;
+        // Read request body
+        const body = await request.json();
 
-        if (!HE_TOKEN) {
-          return json({
-            error: "HE_TOKEN is missing in Cloudflare Worker Secrets"
-          }, 500);
+        const prompt = body.prompt;
+        const ratio = body.ratio || "16:9";
+
+        if (!prompt || typeof prompt !== "string") {
+          return jsonResponse(
+            {
+              success: false,
+              error: "Prompt is required"
+            },
+            400
+          );
         }
 
-        const response = await fetch(
-          `https://queue.fal.run/${MODEL}`,
+        // Optional negative prompt
+        const negativePrompt =
+          body.negative_prompt ||
+          "blurry, low quality, distorted, watermark, text, logo";
+
+        // Hugging Face Inference API
+        const hfResponse = await fetch(
+          "https://router.huggingface.co/hf-inference/models/" + MODEL,
           {
             method: "POST",
             headers: {
-              "Authorization": `Key ${HE_TOKEN}`,
+              "Authorization": `Bearer ${env.HF_TOKEN}`,
               "Content-Type": "application/json"
             },
             body: JSON.stringify({
-              prompt,
-              aspect_ratio: ratio || "16:9"
+              inputs: prompt,
+              parameters: {
+                negative_prompt: negativePrompt
+              }
             })
           }
         );
 
-        const data = await response.json();
+        // Handle HF errors
+        if (!hfResponse.ok) {
+          const errorText = await hfResponse.text();
 
-        if (!response.ok) {
-          return json({
-            error: "fal.ai request failed",
-            status: response.status,
-            details: data
-          }, response.status);
+          return jsonResponse(
+            {
+              success: false,
+              error: "Hugging Face request failed",
+              status: hfResponse.status,
+              details: errorText
+            },
+            hfResponse.status
+          );
         }
 
-        return json(data, 200);
+        // HF returns generated video as binary data
+        const videoBuffer = await hfResponse.arrayBuffer();
+
+        // Convert video to base64 so frontend can receive it
+        const base64Video = arrayBufferToBase64(videoBuffer);
+
+        return jsonResponse({
+          success: true,
+          provider: "Hugging Face",
+          model: MODEL,
+          ratio: ratio,
+          video: `data:video/mp4;base64,${base64Video}`
+        });
 
       } catch (error) {
-        return json({
-          error: "Server error",
-          message: error.message
-        }, 500);
+        return jsonResponse(
+          {
+            success: false,
+            error: "Server error",
+            details: error.message
+          },
+          500
+        );
       }
     }
 
-    return json({
-      error: "Not found"
-    }, 404);
+    return jsonResponse(
+      {
+        success: false,
+        error: "Route not found"
+      },
+      404
+    );
   }
 };
 
-function json(data, status = 200) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
-      }
-    }
-  );
+
+// -----------------------------
+// Helper functions
+// -----------------------------
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+  };
 }
+
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders()
+    }
+  });
+}
+
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+
+  let binary = "";
+
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(
+      i,
+      Math.min(i + chunkSize, bytes.length)
+    );
+
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
+    }
